@@ -1,9 +1,14 @@
-name: collect
+name: compact
 
 on:
   schedule:
-    - cron: "2-59/5 * * * *"
+    - cron: "15 0 * * *"
   workflow_dispatch:
+    inputs:
+      day:
+        description: "UTC day to compact, as YYYY-MM-DD (default: yesterday)"
+        required: false
+        default: ""
 
 concurrency:
   group: velib-data
@@ -13,14 +18,23 @@ permissions:
   contents: write
 
 jobs:
-  snapshot:
+  compact:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Check out velib-data
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+
+      - name: Pick the day and fetch its history
+        id: day
+        env:
+          INPUT_DAY: ${{ inputs.day }}
+        run: |
+          day="${INPUT_DAY:-$(date -u -d yesterday +%F)}"
+          echo "day=${day}" >> "$GITHUB_OUTPUT"
+          git fetch --quiet --shallow-since="$(date -u -d "${day} -1 day" +%F)" origin main
 
       - name: Check out the velib code
         uses: actions/checkout@v7
@@ -36,20 +50,23 @@ jobs:
           enable-cache: true
           cache-dependency-glob: code/uv.lock
 
-      - name: Take a snapshot
-        id: snapshot
-        run: |
-          message="$(uv run --project code --no-dev --frozen velib-collect snapshot --output-dir raw)"
-          echo "message=${message}" >> "$GITHUB_OUTPUT"
+      - name: Compact the day
+        env:
+          DAY: ${{ steps.day.outputs.day }}
+        run: uv run --project code --no-dev --frozen velib-collect compact --day "$DAY" --repo .
 
       - name: Commit and push
         env:
-          MESSAGE: ${{ steps.snapshot.outputs.message }}
+          DAY: ${{ steps.day.outputs.day }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add raw
-          git commit --quiet -m "$MESSAGE"
+          git add daily stations
+          if git diff --cached --quiet; then
+            echo "nothing changed for ${DAY}"
+            exit 0
+          fi
+          git commit --quiet -m "compact ${DAY}"
           for attempt in 1 2 3; do
             if git push --quiet; then
               exit 0
