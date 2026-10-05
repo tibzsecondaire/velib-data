@@ -25,6 +25,7 @@ jobs:
       - name: Check out velib-data
         uses: actions/checkout@v7
         with:
+          ref: main
           fetch-depth: 1
 
       - name: Pick the day and fetch its history
@@ -67,11 +68,16 @@ jobs:
             exit 0
           fi
           git commit --quiet -m "compact ${DAY}"
+          commit="$(git rev-parse HEAD)"
           for attempt in 1 2 3; do
-            if git push --quiet; then
+            if git push --quiet origin HEAD:main; then
               exit 0
             fi
-            echo "push rejected (attempt ${attempt}), rebasing"
-            git pull --rebase --quiet
+            echo "push rejected (attempt ${attempt}), replaying on the latest main"
+            git fetch --quiet origin main
+            git reset --quiet --hard origin/main
+            git checkout "$commit" -- daily stations
+            git commit --quiet -m "compact ${DAY}"
+            commit="$(git rev-parse HEAD)"
           done
           exit 1
