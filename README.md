@@ -4,6 +4,7 @@ History of the availability of the Vélib' Métropole bike-sharing stations (Par
 5 minutes from the official GBFS open data feeds.
 
 The collection code lives in [tibzsecondaire/velib](https://github.com/tibzsecondaire/velib).
+A live map of the latest snapshot is on <https://tibzsecondaire.github.io/velib/map/>.
 
 ## Source and license
 
