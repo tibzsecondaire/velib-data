@@ -15,7 +15,7 @@ permissions:
 jobs:
   snapshot:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     steps:
       - name: Check out velib-data
         uses: actions/checkout@v7
@@ -37,30 +37,36 @@ jobs:
           enable-cache: true
           cache-dependency-glob: code/uv.lock
 
-      - name: Take a snapshot
-        id: snapshot
-        run: |
-          message="$(uv run --project code --no-dev --frozen velib-collect snapshot --output-dir raw)"
-          echo "message=${message}" >> "$GITHUB_OUTPUT"
-
-      - name: Commit and push
-        env:
-          MESSAGE: ${{ steps.snapshot.outputs.message }}
+      - name: Take a snapshot every 5 minutes for about 12 minutes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add raw
-          git commit --quiet -m "$MESSAGE"
-          commit="$(git rev-parse HEAD)"
-          for attempt in 1 2 3; do
-            if git push --quiet origin HEAD:main; then
-              exit 0
-            fi
-            echo "push rejected (attempt ${attempt}), replaying on the latest main"
-            git fetch --quiet origin main
-            git reset --quiet --hard origin/main
-            git checkout "$commit" -- raw
-            git commit --quiet -m "$MESSAGE"
+          # GitHub runs this 5-minute schedule only about every 15 minutes, so each run takes
+          # several snapshots, on the same marks as the cron (2, 7, 12... minutes past the hour).
+          period=300
+          offset=120
+          deadline=$(( $(date +%s) + 12 * 60 ))
+          while :; do
+            message="$(uv run --project code --no-dev --frozen velib-collect snapshot --output-dir raw)"
+            git add raw
+            git commit --quiet -m "$message"
             commit="$(git rev-parse HEAD)"
+            pushed=0
+            for attempt in 1 2 3; do
+              if git push --quiet origin HEAD:main; then
+                pushed=1
+                break
+              fi
+              echo "push rejected (attempt ${attempt}), replaying on the latest main"
+              git fetch --quiet origin main
+              git reset --quiet --hard origin/main
+              git checkout "$commit" -- raw
+              git commit --quiet -m "$message"
+              commit="$(git rev-parse HEAD)"
+            done
+            [ "$pushed" = 1 ] || exit 1
+            now=$(date +%s)
+            next=$(( (now - offset) / period * period + period + offset ))
+            [ "$next" -lt "$deadline" ] || break
+            sleep $(( next - now ))
           done
-          exit 1
