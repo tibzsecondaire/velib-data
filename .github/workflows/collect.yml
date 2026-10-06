@@ -46,6 +46,16 @@ jobs:
           period=300
           offset=120
           deadline=$(( $(date +%s) + 12 * 60 ))
+          # A run that starts right after another one waits for the next mark, to avoid 2
+          # snapshots a few seconds apart.
+          last=0
+          if [ -f raw/snapshot_meta.json ]; then
+            last=$(date -d "$(jq -r .fetched_at raw/snapshot_meta.json)" +%s)
+          fi
+          now=$(date +%s)
+          if [ $(( now - last )) -lt 150 ]; then
+            sleep $(( (now - offset) / period * period + period + offset - now ))
+          fi
           while :; do
             message="$(uv run --project code --no-dev --frozen velib-collect snapshot --output-dir raw)"
             git add raw
